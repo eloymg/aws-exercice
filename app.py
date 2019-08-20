@@ -41,7 +41,9 @@ def getVariable():
     reference = request.args.get("reference")
     if token == session["response"]:
         s = session["response"]
-        subprocess.Popen(["python3 stillcpu.py {}".format(reference)], shell=True)
+        subprocess.Popen(
+            ["python3 /aws-exercice/stillcpu.py {}".format(reference)], shell=True
+        )
         return render_template("getsession.html", name=s)
     else:
         return make_response("<h4>Bad Token!</h4>")
@@ -50,6 +52,7 @@ def getVariable():
 def randomString(stringLength=10):
     letters = string.ascii_lowercase
     return "".join(random.choice(letters) for i in range(stringLength))
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0")

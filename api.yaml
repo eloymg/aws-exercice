@@ -185,7 +185,18 @@ Resources:
                 - sqs:ChangeMessageVisibility
                 Resource: !GetAtt MyQueue.Arn
           PolicyName: "lambda-consumer-sqs"
-
+        - PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                - "ec2:CreateNetworkInterface"
+                - "ec2:DescribeNetworkInterfaces"
+                - "ec2:DeleteNetworkInterface"
+                - "ec2:DescribeSecurityGroups"
+                - "ec2:DescribeSubnets"
+                Resource: "*"
+          PolicyName: "lambda-consumer-network"
   lambdaConsumerLogGroup:
     Type: "AWS::Logs::LogGroup"
     Properties:
@@ -234,27 +245,28 @@ Resources:
       Role: !GetAtt "lambdaConsumerIAMRole.Arn"
       Runtime: "python2.7"
       Timeout: 10
-      SecurityGroupIds:
-        Ref: LambdaSecurityGroup
-      SubnetIds:
-        - Ref: PrivSubnetZoneA
-        - Ref: PrivSubnetZoneB
+      VpcConfig:
+        SecurityGroupIds:
+          - Ref: 'LambdaSecurityGroup'
+        SubnetIds:
+          - Ref: PrivSubnetZoneA
+          - Ref: PrivSubnetZoneB
 
   LambdaSecurityGroup:
-  Type: AWS::EC2::SecurityGroup
-  Properties:
-      GroupDescription: Allow http to client host
-      VpcId:
-         Ref: VPC
-      SecurityGroupEgress:
-      - IpProtocol: -1
-        CidrIp: 0.0.0.0/0
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow http to client host
+        VpcId:
+            Ref: 'VPC'
+        SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
 
   LambdaCronRule: 
       Type: AWS::Events::Rule
       Properties: 
         Description: "EventRule"
-        ScheduleExpression: "rate(1 minutes)"
+        ScheduleExpression: "rate(1 minute)"
         State: "ENABLED" 
         Targets:
          - Arn: !GetAtt lambdaFunctionConsumer.Arn
@@ -277,10 +289,6 @@ Resources:
           EnableDnsSupport: true
           EnableDnsHostnames: true
           InstanceTenancy: 'default'
-          Tags:
-              - Key: 'Name'
-                Value:
-                    Ref: 'AWS::StackName'
   # Internet accessable subnet in the first availability zone
   PubSubnetZoneA:
       Type: 'AWS::EC2::Subnet'
@@ -477,6 +485,58 @@ Resources:
                 Ref: 'RouteTablePrivZoneB'
 
 # EC2 things
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: Allow http to client host
+        VpcId:
+            Ref: VPC
+        SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+        SecurityGroupIngress:
+        - IpProtocol: -1
+          CidrIp: 188.84.26.33/32
+  EC2IAMRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  EC2Instance:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties: 
+      IamInstanceProfile: !Ref EC2IAMRole
+      ImageId: ami-0bbc25e23a7640b9b
+      InstanceType: t3.nano
+      SecurityGroups:
+        - !Ref EC2SecurityGroup
+      BlockDeviceMappings:
+      - DeviceName: "/dev/sda1"
+        Ebs:
+          VolumeSize: 8
+          VolumeType: gp2
+      UserData:
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+
+            yum install -y python3
+            yum install -y git
+
+            git clone https://github.com/eloymg/aws-exercice
+            pip3 install -r aws-exercice/requirements.txt
+            python3 aws-exercice/app.py &
+
   EC2TargetGroup:
       Type: AWS::ElasticLoadBalancingV2::TargetGroup
       Properties:
@@ -487,23 +547,19 @@ Resources:
         Matcher:
           HttpCode: '200'
         Name: EC2TargetGroup
-        Port: 80
+        Port: 5000
         Protocol: HTTP
         TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '20'
-        #Targets:
-        #- Id:
-        #    Ref: AmazonLinuxInstance
-        #  Port: 80
+        Targets:
+        - Id:
+            Ref: EC2Instance
+          Port: 5000
         UnhealthyThresholdCount: 3
         VpcId:
           Ref: 'VPC'
-        Tags:
-        - Key: Name
-          Value: EC2TargetGroup
-        - Key: Port
-          Value: 80
+
   ALBListener:
       Type: AWS::ElasticLoadBalancingV2::Listener
       Properties:
@@ -512,7 +568,7 @@ Resources:
             TargetGroupArn:
               Ref: EC2TargetGroup
         LoadBalancerArn:
-            Ref: PunlicApplicationLoadBalancer
+            Ref: PublicApplicationLoadBalancer
         Port: 80
         Protocol: HTTP
   PublicApplicationLoadBalancer:
@@ -522,8 +578,19 @@ Resources:
         Subnets:
         - Ref: PubSubnetZoneA
         - Ref: PubSubnetZoneB
-        #SecurityGroups:
-        #- Ref: ELBSecurityGroup
+        SecurityGroups:
+        - Ref: EC2SecurityGroup
+  MyServerGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AvailabilityZones:
+        Fn::GetAZs: ''
+      LaunchConfigurationName:
+        Ref: EC2Instance
+      MinSize: '1'
+      MaxSize: '3'
+      LoadBalancerNames:
+      - Ref: PublicApplicationLoadBalancer
 Outputs:
   apiGatewayInvokeURL:
     Value: !Sub "https://${apiGateway}.execute-api.${AWS::Region}.amazonaws.com/${apiGatewayStageName}"
