@@ -52,4 +52,4 @@ def randomString(stringLength=10):
     return "".join(random.choice(letters) for i in range(stringLength))
 
 if __name__ == "__main__":
-    app.run(Debug=True)
+    app.run(host="0.0.0.0")
