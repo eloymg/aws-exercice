@@ -27,8 +27,8 @@ sess.init_app(app)
 
 @app.route("/")
 def home():
-    print(session["response"])
-    t = session["response"] = randomString()
+
+    t = session["response"] = randomString(stringLength=30)
     res = make_response(
         "<p>The session is set with value: <strong>{}</strong></p>".format(t)
     )
@@ -41,7 +41,7 @@ def getVariable():
     reference = request.args.get("reference")
     if token == session["response"]:
         s = session["response"]
-        subprocess.Popen(["python stillcpu.py {}".format(reference)], shell=True)
+        subprocess.Popen(["python3 stillcpu.py {}".format(reference)], shell=True)
         return render_template("getsession.html", name=s)
     else:
         return make_response("<h4>Bad Token!</h4>")
@@ -50,16 +50,6 @@ def getVariable():
 def randomString(stringLength=10):
     letters = string.ascii_lowercase
     return "".join(random.choice(letters) for i in range(stringLength))
-
-
-def stillCPU():
-    a = True
-    t = time.time()
-    while a:
-        time.sleep(0.0001)
-        if (time.time() - t) > 10:
-            a = False
-
 
 if __name__ == "__main__":
     app.run(Debug=True)

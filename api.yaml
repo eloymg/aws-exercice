@@ -48,7 +48,7 @@ Resources:
       RestApiId: !Ref "apiGateway"
       RequestParameters:
           method.request.querystring.token: true
-          method.request.querystring.id: true
+          method.request.querystring.reference: true
   apiGatewayDeployment:
     Type: "AWS::ApiGateway::Deployment"
     DependsOn:
@@ -212,14 +212,14 @@ Resources:
             response = queue.receive_message(MaxNumberOfMessages=50, VisibilityTimeout=360)
             conn = httplib.HTTPSConnection(QueueName=os.environ['ALB'])
             for i in response["messages"]:
-              if checkKey(i["body"]["message"]):
+              if checkKey(i["body"]["reference"]):
                 queue.delete_message(i["ReceiptHandle"])
               else:
-                conn.request("GET","/?message={}".format(i["body"]))
+                conn.request("GET","/?token={}&reference={}".format(i["body"]["token"],i["body"]["reference"]))
             return "done"
-          def checkKey(message):
+          def checkKey(reference):
             try:
-                  s3.Object(os.environ['BUCKET'], message).load()
+                  s3.Object(os.environ['BUCKET'], reference).load()
             except botocore.exceptions.ClientError as e:
                   if e.response['Error']['Code'] == "404":
                       return False
