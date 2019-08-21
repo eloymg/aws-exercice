@@ -62,7 +62,7 @@ Resources:
     Properties:
       Environment:
         Variables:
-          queue: !GetAtt MyQueue.QueueName
+          QUEUE: !GetAtt MyQueue.QueueName
       Code:
         ZipFile: |
           import os
@@ -177,7 +177,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                - sqs:ReciveMessage
+                - sqs:ReceiveMessage
                 - sqs:SendMessage
                 - sqs:GetQueueUrl
                 - sqs:DeleteMessage
@@ -208,8 +208,8 @@ Resources:
     Properties:
       Environment:
         Variables:
-          alb: !GetAtt PublicApplicationLoadBalancer.DNSName
-          queue: !GetAtt MyQueue.QueueName
+          ALB: !GetAtt PublicApplicationLoadBalancer.DNSName
+          QUEUE: !GetAtt MyQueue.QueueName
       Code:
         ZipFile: |
           import os
@@ -245,12 +245,12 @@ Resources:
       Role: !GetAtt "lambdaConsumerIAMRole.Arn"
       Runtime: "python2.7"
       Timeout: 10
-      VpcConfig:
-        SecurityGroupIds:
-          - Ref: 'LambdaSecurityGroup'
-        SubnetIds:
-          - Ref: PrivSubnetZoneA
-          - Ref: PrivSubnetZoneB
+      #VpcConfig:
+      #  SecurityGroupIds:
+      #    - Ref: 'LambdaSecurityGroup'
+      #  SubnetIds:
+      #    - Ref: PubSubnetZoneA
+      #    - Ref: PubSubnetZoneB
 
   LambdaSecurityGroup:
       Type: AWS::EC2::SecurityGroup
@@ -485,18 +485,34 @@ Resources:
                 Ref: 'RouteTablePrivZoneB'
 
 # EC2 things
-  EC2SecurityGroup:
+  ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
         GroupDescription: Allow http to client host
         VpcId:
-            Ref: VPC
+            Ref: 'VPC'
         SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
         SecurityGroupIngress:
         - IpProtocol: -1
           CidrIp: 188.84.26.33/32
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+        GroupDescription: Allow http to client host
+        VpcId:
+            Ref: 'VPC'
+        SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: 
+            Ref: ALBSecurityGroup
   EC2IAMRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -511,11 +527,18 @@ Resources:
                 - "ec2.amazonaws.com"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        
+  EC2InstanceProfile:        
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+       Roles:
+        - Ref: EC2IAMRole
+       InstanceProfileName: EC2InstanceProfile
 
   EC2Instance:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties: 
-      IamInstanceProfile: !Ref EC2IAMRole
+      IamInstanceProfile: !Ref EC2InstanceProfile
       ImageId: ami-0bbc25e23a7640b9b
       InstanceType: t3.nano
       SecurityGroups:
@@ -552,10 +575,6 @@ Resources:
         TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '20'
-        Targets:
-        - Id:
-            Ref: EC2Instance
-          Port: 5000
         UnhealthyThresholdCount: 3
         VpcId:
           Ref: 'VPC'
@@ -579,18 +598,20 @@ Resources:
         - Ref: PubSubnetZoneA
         - Ref: PubSubnetZoneB
         SecurityGroups:
-        - Ref: EC2SecurityGroup
+        - Ref: ALBSecurityGroup
   MyServerGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
-      AvailabilityZones:
-        Fn::GetAZs: ''
       LaunchConfigurationName:
         Ref: EC2Instance
       MinSize: '1'
       MaxSize: '3'
-      LoadBalancerNames:
-      - Ref: PublicApplicationLoadBalancer
+      TargetGroupARNs:
+      - Ref: EC2TargetGroup
+      VPCZoneIdentifier: 
+      - Ref: PubSubnetZoneA
+      - Ref: PubSubnetZoneB
+
 Outputs:
   apiGatewayInvokeURL:
     Value: !Sub "https://${apiGateway}.execute-api.${AWS::Region}.amazonaws.com/${apiGatewayStageName}"
